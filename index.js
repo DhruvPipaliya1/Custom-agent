@@ -3,16 +3,31 @@ import { ChatGroq } from '@langchain/groq';
 import { StateGraph } from '@langchain/langgraph';
 import { MessagesAnnotation } from '@langchain/langgraph';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { ToolNode } from '@langchain/langgraph/prebuilt';
+import { MemorySaver } from '@langchain/langgraph';
 import readline from 'node:readline/promises';
 import "dotenv/config";
+import { TavilySearch } from '@langchain/tavily';
+import { threadId } from 'node:worker_threads';
 
+
+const checkpointer = new MemorySaver();
+
+const tool = new TavilySearch({
+    maxResults: 3,
+    topic: 'general',
+})
+
+//Intialise Tools
+const tools = [tool];
+const toolNode = new ToolNode(tools);
 
 //LLM Initialization
 const llm = new ChatGroq({
     model: "openai/gpt-oss-120b",
     temperature: 0,
     maxRetries: 2,
-});
+}).bindTools(tools);
 
 
 //Promt Template
@@ -33,10 +48,25 @@ async function callModel(state) {
 }
 
 
-//Build Langgraph Workflow
-const workflow = new StateGraph(MessagesAnnotation).addNode("agent", callModel).addEdge('__start__', 'agent').addEdge('agent', '__end__');
+//
+function shouldContinue(state) {
+    const lastMessages = state.messages[state.messages.length - 1];
+    if(lastMessages.tool_calls.length > 0){
+        return 'tools';
+    }
+    return '__end__';
+}
 
-const app = workflow.compile();
+
+//Build Langgraph Workflow
+const workflow = new StateGraph(MessagesAnnotation)
+    .addNode("agent", callModel)
+    .addNode("tools", toolNode)
+    .addEdge('__start__', 'agent')
+    .addEdge('tools', 'agent')
+    .addConditionalEdges('agent', shouldContinue);
+
+const app = workflow.compile({ checkpointer });
 
 async function main(){
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -51,6 +81,9 @@ async function main(){
         // Pass the new message wrapped in the required { messages: [...] } object
         const finalState = await app.invoke({
             messages: [new HumanMessage(userInput)],
+        },
+        {
+            configurable: { thread_id: '1' }
         });
 
         // finalState is an object { messages: [...] }
