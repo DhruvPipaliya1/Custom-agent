@@ -6,17 +6,23 @@ import { ChatPromptTemplate } from '@langchain/core/prompts';
 import readline from 'node:readline/promises';
 import "dotenv/config";
 
+
+//LLM Initialization
 const llm = new ChatGroq({
     model: "openai/gpt-oss-120b",
     temperature: 0,
     maxRetries: 2,
 });
 
+
+//Promt Template
 const promptTemplate = ChatPromptTemplate.fromMessages([
     new SystemMessage("You are a helpful assistant."),
     ["placeholder", "{messages}"],
 ]);
 
+
+//Calling Model
 async function callModel(state) {
     console.log("Calling LLM..");
     const formattedInput = await promptTemplate.formatMessages({ 
@@ -26,6 +32,8 @@ async function callModel(state) {
     return { messages: [response] };
 }
 
+
+//Build Langgraph Workflow
 const workflow = new StateGraph(MessagesAnnotation).addNode("agent", callModel).addEdge('__start__', 'agent').addEdge('agent', '__end__');
 
 const app = workflow.compile();
