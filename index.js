@@ -7,9 +7,22 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { MemorySaver } from '@langchain/langgraph';
 import readline from 'node:readline/promises';
 import "dotenv/config";
+import ReactMarkdown from "react-markdown";
 import { TavilySearch } from '@langchain/tavily';
-import { threadId } from 'node:worker_threads';
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+// import cors from 'cors';
 
+const port = 3000;
+const app = express();
+app.use(express.json());
+// app.use(cors());
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const dirpath = path.join(__dirname, 'public', 'index.html');
 
 const checkpointer = new MemorySaver();
 
@@ -66,31 +79,61 @@ const workflow = new StateGraph(MessagesAnnotation)
     .addEdge('tools', 'agent')
     .addConditionalEdges('agent', shouldContinue);
 
-const app = workflow.compile({ checkpointer });
+const zapp = workflow.compile({ checkpointer });
 
-async function main(){
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    
-    // With MessagesAnnotation, the internal state manages the history, 
-    // we don't need a local 'state' variable to accumulate history.
+app.get('/',(req, res) => {
+    res.sendFile(dirpath);
+});
 
-    while(true){
-        const userInput = await rl.question('You:');
-        if(userInput == '/bye') break;
+app.listen(port, () => {
+    console.log("Run Server...")
+});
 
-        // Pass the new message wrapped in the required { messages: [...] } object
-        const finalState = await app.invoke({
+app.post("/api/chat", async (req, res) => {
+    const userInput = req.body.input;
+    try{
+       // Pass the new message wrapped in the required { messages: [...] } object
+        const finalState = await zapp.invoke({
             messages: [new HumanMessage(userInput)],
         },
         {
             configurable: { thread_id: '1' }
         });
 
-        // finalState is an object { messages: [...] }
-        console.log('Final: ', finalState.messages.at(-1).content);
+        if(finalState.messages.at(-1).content){
+            return res.json({ output: finalState.messages.at(-1).content });
+        }
+        res.status(500).json({output: "Sorry, something went wrong. Please try later."});
     }
+    catch(err){
+        console.log("Error during execution: ", err);
+        res.status(500).json({output: "Sorry, something went wrong. Please try later."});
+    }
+});
 
-    rl.close();
-}
+// async function main(){
+//     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    
+//     // With MessagesAnnotation, the internal state manages the history, 
+//     // we don't need a local 'state' variable to accumulate history.
 
-main();
+//     while(true){
+//         const userInput = await rl.question('You:');
+//         if(userInput == '/bye') break;
+
+//         // Pass the new message wrapped in the required { messages: [...] } object
+//         const finalState = await zapp.invoke({
+//             messages: [new HumanMessage(userInput)],
+//         },
+//         {
+//             configurable: { thread_id: '1' }
+//         });
+
+//         // finalState is an object { messages: [...] }
+//         console.log('Final: ', finalState.messages.at(-1).content);
+//     }
+
+//     rl.close();
+// }
+
+// main();
